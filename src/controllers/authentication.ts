@@ -1,3 +1,7 @@
+import dotenv from "dotenv";
+dotenv.config();
+import { authenticateJWT } from "../middleware/auth.middleware";
+import { AuthRequest } from "../middleware/auth.middleware";
 import express from "express";
 import {
   getUsers,
@@ -8,14 +12,13 @@ import {
   updateUserById,
 } from "../models/users";
 import {
-  random,
-  createSessionToken,
+  generateJWT,
   hashPassword,
   verifyPassword,
-} from "../helpers";
+} from "../helpers/auth.helpers";
 
 const setupAuthRoutes = (router: express.Router) => {
-  // Registrera användare
+  // Registrerar användare
   router.post("/auth/register", async (req, res) => {
     const {
       username,
@@ -28,19 +31,16 @@ const setupAuthRoutes = (router: express.Router) => {
     } = req.body;
 
     try {
-      // Kontrollera om användarnamn eller email redan finns
+      // Kontrollerar om användarnamn eller email redan finns
       if (await getUserByEmail(email)) {
         return res.status(409).json({ message: "Email är redan registrerat" });
       }
       if (await getUserByUsername(username)) {
         return res
           .status(409)
-          .json({ message: "Användarnamn är redan upptaget" });
+          .json({ message: "Username already in use" });
       }
-
-      const salt = random();
       const hashedPassword = await hashPassword(password);
-      const sessionToken = createSessionToken(salt, password);
 
       const newUser = {
         username,
@@ -50,9 +50,7 @@ const setupAuthRoutes = (router: express.Router) => {
         streetAddress,
         postalCode,
         authentication: {
-          salt,
           password: hashedPassword,
-          sessionToken,
         },
       };
 
@@ -64,7 +62,7 @@ const setupAuthRoutes = (router: express.Router) => {
     }
   });
 
-  // Logga in användare
+  // Logga in en användare
   router.post("/auth/login", async (req, res) => {
     const { username, password } = req.body;
 
@@ -75,7 +73,7 @@ const setupAuthRoutes = (router: express.Router) => {
       if (!user) {
         return res
           .status(401)
-          .json({ message: "Felaktigt användarnamn eller lösenord" });
+          .json({ message: "Username or password wrong" });
       }
 
       const isPasswordValid = await verifyPassword(
@@ -85,68 +83,70 @@ const setupAuthRoutes = (router: express.Router) => {
       if (!isPasswordValid) {
         return res
           .status(401)
-          .json({ message: "Felaktigt användarnamn eller lösenord" });
+          .json({ message: "Username or password wrong" });
       }
 
-      // Skapa ny sessionToken och spara
-      const sessionToken = createSessionToken(
-        user.authentication.salt,
-        password
-      );
-      user.authentication.sessionToken = sessionToken;
-      await user.save();
+      // Skapa jwtToken
+      const jwtToken = generateJWT({ id: user._id, username: user.username });
 
-      return res
-        .status(200)
-        .json({ message: "Inloggning lyckades", sessionToken });
+      return res.status(200).json({
+        message: "Successful login",
+        token: jwtToken,
+      });
     } catch (error) {
       console.error("Login error:", error);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // Uppdatera användare
-  router.put("/auth/users/:id", async (req, res) => {
+  // Uppdaterar användare
+  router.put("/auth/users/:id", authenticateJWT, async (req: AuthRequest, res) => {
     const { id } = req.params;
+    if (req.user.id !== id) {
+      return res.status(403).json({ message: "You don't have access to perform changes." })
+    }
 
     try {
       const updatedUser = await updateUserById(id, req.body);
       if (!updatedUser) {
-        return res.status(404).json({ message: "Användare hittades inte" });
+        return res.status(404).json({ message: "Couldn't find user" });
       }
       return res.status(200).json(updatedUser);
     } catch (error) {
       console.error("Update error:", error);
-      return res.status(500).json({ message: "Uppdatering misslyckades" });
+      return res.status(500).json({ message: "Update failed" });
     }
   });
 
   // Ta bort användare
-  router.delete("/auth/users/:id", async (req, res) => {
+  router.delete("/auth/users/:id", authenticateJWT, async (req: AuthRequest, res) => {
     const { id } = req.params;
+    if (req.user.id !== id) {
+      return res.status(403).json({ message: "Du har inte behörighet att ta bort denna användare" });
+    }
 
     try {
       const deletedUser = await deleteUserById(id);
       if (!deletedUser) {
-        return res.status(404).json({ message: "Användare hittades inte" });
+        return res.status(404).json({ message: "Could not find user per id" });
       }
       return res
         .status(200)
         .json({ message: "Användare borttagen", user: deletedUser });
     } catch (error) {
       console.error("Delete error:", error);
-      return res.status(500).json({ message: "Borttagning misslyckades" });
+      return res.status(500).json({ message: "Delete failed" });
     }
   });
 
-  // Hämta alla användare (exempel på route)
+  // Hämta alla användare
   router.get("/auth/users", async (_req, res) => {
     try {
       const users = await getUsers();
       res.status(200).json(users);
     } catch (error) {
       console.error("Get users error:", error);
-      res.status(500).json({ message: "Kunde inte hämta användare" });
+      res.status(500).json({ message: "Couldn't fetch users" });
     }
   });
 };

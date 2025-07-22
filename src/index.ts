@@ -6,12 +6,13 @@ import compression from "compression";
 import cors from "cors";
 import mongoose from "mongoose";
 import { createUserRouter } from "./router";
-
+import dotenv from "dotenv";
 const app = express();
 
+dotenv.config();
 app.use(cors({
   credentials: true,
-  origin: true,
+  origin: "http://localhost:3000"
 }));
 
 app.use(compression());
@@ -22,16 +23,19 @@ app.use('/', createUserRouter());
 
 const server = http.createServer(app);
 
-const 
-
 async function startServer() {
   try {
-    await mongoose.connect(MONGO_URL);
+    const mongoUri = process.env.MONGO_URI;
+    if (!mongoUri) throw new Error("not defined in .env");
+
+    await mongoose.connect(mongoUri);
     console.log("MongoDB connected");
 
-    server.listen(3000, () => {
-      console.log("Server is running on http://localhost:3000");
+    const PORT = process.env.PORT || 3030;
+    server.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}`);
     });
+
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
   }
